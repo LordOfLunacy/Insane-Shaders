@@ -15,7 +15,7 @@
 		apply any preprocessor definitions to it.
 */
 
-#ifndef
+#ifndef SAMPLEDISTANCE
 	#define SAMPLEDISTANCE 5
 #endif
 
