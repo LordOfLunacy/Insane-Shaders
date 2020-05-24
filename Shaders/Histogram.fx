@@ -10,10 +10,8 @@
 	Green: 7
 	Blue:  10
 	Depth: 13
-	
-	note: If using the depth histogram, please keep in mind that this shader is not configured to
-		apply any preprocessor definitions to it.
 */
+#include "ReShade.fxh"
 
 #ifndef SAMPLEDISTANCE
 	#define SAMPLEDISTANCE 5
@@ -61,10 +59,6 @@ uniform uint BARMULTIPLIER <
 > = 4;
 
 
-texture TexColor : COLOR;
-sampler sTexColor {Texture = TexColor;};
-texture TexDepth : DEPTH;
-sampler sTexDepth {Texture = TexDepth;};
 texture Histogram {Width = 256; Height = 15; Format = R32F;};
 sampler sHistogram {Texture = Histogram;};
 
@@ -88,31 +82,31 @@ void HistogramVS(uint id : SV_VERTEXID, out float4 pos : SV_POSITION)
 	float y;
 	if (iteration == ITERATION_LUMA)
 	{
-		float3 rgb = tex2Dfetch(sTexColor, texturePos).rgb;
+		float3 rgb = tex2Dfetch(ReShade::BackBuffer, texturePos).rgb;
 		float3 luma = (0.3, 0.59, 0.11);
 		color = dot(rgb, luma)*3;
 		y = 0.8;
 	}
 	else if (iteration == ITERATION_RED) 
 	{
-		color = tex2Dfetch(sTexColor, texturePos).r;
+		color = tex2Dfetch(ReShade::BackBuffer, texturePos).r;
 		y = 0.4;
 	}
 	else if (iteration == ITERATION_GREEN)
 	{
-		color = tex2Dfetch(sTexColor, texturePos).g;
+		color = tex2Dfetch(ReShade::BackBuffer, texturePos).g;
 		y = 0;
 	}
 	else if (iteration == ITERATION_BLUE)
 	{
-		color = tex2Dfetch(sTexColor, texturePos).b;
+		color = tex2Dfetch(ReShade::BackBuffer, texturePos).b;
 		y = -0.4;
 	}
-	else if (iteration == ITERATION_DEPTH)
-	{
-		color = tex2Dfetch(sTexDepth, texturePos).r;
-		y = -0.8;
-	}
+    else if (iteration == ITERATION_DEPTH)
+    {
+        color = ReShade::GetLinearizedDepth(texturePos.xy * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT));
+        y = -0.8;
+    }
 	color = (color * 255 + 0.5)/256;
 	pos = float4(color * 2 - 1, y, 0, 1);
 }
