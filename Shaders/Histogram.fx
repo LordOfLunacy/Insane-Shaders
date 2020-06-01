@@ -111,7 +111,7 @@ void HistogramVS(uint id : SV_VERTEXID, out float4 pos : SV_POSITION)
 	pos = float4(color * 2 - 1, y, 0, 1);
 }
 
-void LumaGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position, out float2 texcoord : TEXCOORD)
+void LumaGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position)
 {
 	uint xpos = (id/2) % 256;
 	bool odd = id % 2;
@@ -122,7 +122,7 @@ void LumaGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position, out flo
 	pos = float4(x * 2 - 1, y, 0, 1);
 }
 
-void RedGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position, out float2 texcoord : TEXCOORD)
+void RedGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position)
 {
 	uint xpos = (id/2) % 256;
 	bool odd = id % 2;
@@ -133,7 +133,7 @@ void RedGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position, out floa
 	pos = float4(x * 2 - 1, y, 0, 1);
 }
 
-void GreenGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position, out float2 texcoord : TEXCOORD)
+void GreenGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position)
 {
 	uint xpos = (id/2) % 256;
 	bool odd = id % 2;
@@ -144,7 +144,7 @@ void GreenGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position, out fl
 	pos = float4(x * 2 - 1, y, 0, 1);
 }
 
-void BlueGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position, out float2 texcoord : TEXCOORD)
+void BlueGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position)
 {
 	uint xpos = (id/2) % 256;
 	bool odd = id % 2;
@@ -155,7 +155,7 @@ void BlueGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position, out flo
 	pos = float4(x * 2 - 1, y, 0, 1);
 }
 
-void DepthGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position, out float2 texcoord : TEXCOORD)
+void DepthGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position)
 {
 	uint xpos = (id/2) % 256;
 	bool odd = id % 2;
@@ -166,13 +166,13 @@ void DepthGraphVS(in uint id : SV_VertexID, out float4 pos : SV_Position, out fl
 	pos = float4(x * 2 - 1, y, 0, 1);
 }
 
-void HistogramPS(float4 pos : SV_POSITION, out float col : SV_TARGET )
+void HistogramPS(float4 pos : SV_POSITION, out float col : SV_TARGET)
 {
 	col = 1;
 }
 
 
-technique Histogram <ui_tooltip = "Press PgUp to turn off rendering to graphs";>
+technique Histogram <ui_tooltip = "Press PgUp to turn on rendering to graphs";>
 {
 	pass
 	{
@@ -191,7 +191,7 @@ technique Histogram <ui_tooltip = "Press PgUp to turn off rendering to graphs";>
 
 //This is seperated from the rest of the code, as graph visuals aren't useful for much more than debugging,
 //and do cost a noticeable amount of resources to generate
-technique HistogramGraphs <hidden = true; enabled = true; toggle = 0x21;>
+technique HistogramGraphs <hidden = true; toggle = 0x21;>
 {
 	pass Luma
 	{
