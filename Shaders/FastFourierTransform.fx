@@ -56,7 +56,7 @@ and is used to convert images from the spatial domain to the frequency domain.
 #define ODD (BUTTERFLY_COUNT % 2)
 
 
-texture ButterflyTable{Width = SUBBLOCK_SIZE; Height = BUTTERFLY_COUNT; Format = RGBA32F;};
+texture ButterflyTable{Width = SUBBLOCK_SIZE; Height = BUTTERFLY_COUNT; Format = RGBA16F;};
 sampler sButterflyTable{Texture = ButterflyTable;};
 texture FFTInput{Width = TEXTURE_SIZE.x; Height = TEXTURE_SIZE.y; Format = RG8;};
 sampler sFFTInput{Texture = FFTInput;};
