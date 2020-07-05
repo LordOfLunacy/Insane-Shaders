@@ -76,14 +76,14 @@ texture DarkChannel {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R8;}
 sampler sDarkChannel {Texture = DarkChannel;};
 texture Transmission {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R8;};
 sampler sTransmission {Texture = Transmission;};
-texture LumaHistogram {Width = 256; Height = 1; Format = R8;};
+texture LumaHistogram {Width = 256; Height = 1; Format = R32F;};
 sampler sLumaHistogram {Texture = LumaHistogram;};
 texture MedianLuma {Width = 1; Height = 1; Format = R8;};
 sampler sMedianLuma {Texture = MedianLuma;};
-texture FogRemoved {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16;};
+texture FogRemoved {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F;};
 sampler sFogRemoved {Texture = FogRemoved;};
-texture TruncatedPrecision {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16;};
-sampler sTruncatedPrecision {Texture = TrancatedPrecision;};
+texture TruncatedPrecision {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F;};
+sampler sTruncatedPrecision {Texture = TruncatedPrecision;};
 
 
 void HistogramVS(uint id : SV_VERTEXID, out float4 pos : SV_POSITION)
@@ -110,13 +110,14 @@ void MedianLumaPS(float4 pos : SV_Position, out float output : SV_Target0)
 {
 	int fifty = 0.5 * SAMPLECOUNT;
 	int sum = 0;
-	int i = 0;
+	uint i = 0;
 	while (sum < fifty)
 	{
-		sum = sum + tex2Dfetch(sLumaHistogram, int4(i%256, 0, 0, 0));
+		sum += tex2Dfetch(sLumaHistogram, int4(i, 0, 0, 0)).r;
 		i++;
 		if (i >= 255) sum = fifty;
 	}
+
 	output = i;
 	output = output / 255;
 }
@@ -160,13 +161,13 @@ void TransmissionPS(float4 pos: SV_Position, float2 texcoord : TexCoord, out flo
 	float darkChannel = tex2D(sDarkChannel, texcoord).r;
 	float colorAttenuation = tex2D(sColorAttenuation, texcoord).r;
 	transmission = (darkChannel / (1 - colorAttenuation));
-	float median = clamp(tex2Dfetch(sMedianLuma, int4(0, 0, 0, 0)), MEDIANBOUNDS.x, MEDIANBOUNDS.y);
+	float median = clamp(tex2Dfetch(sMedianLuma, int4(0, 0, 0, 0)).r, MEDIANBOUNDS.x, MEDIANBOUNDS.y);
 	float v = (median - MEDIANBOUNDS.x) * ((SENSITIVITYBOUNDS.x - SENSITIVITYBOUNDS.y) / (MEDIANBOUNDS.x - MEDIANBOUNDS.y)) + SENSITIVITYBOUNDS.x;
 	transmission = saturate(transmission - v * (darkChannel + darkChannel));
 	transmission = clamp(transmission * (1-v), 0, REMOVALCAP);
 }
 
-void FogRemovalPS(float4 pos: SV_Position, float2 texcoord : TexCoord, out float3 output : SV_Target0)
+void FogRemovalPS(float4 pos: SV_Position, float2 texcoord : TexCoord, out float4 output : SV_Target0)
 {
 	float transmission = tex2D(sTransmission, texcoord).r;
 	float depth = ReShade::GetLinearizedDepth(texcoord);
@@ -177,17 +178,27 @@ void FogRemovalPS(float4 pos: SV_Position, float2 texcoord : TexCoord, out float
 	float strength = saturate((pow(depth, 100*DEPTHCURVE)) * STRENGTH);
 	float3 original = tex2D(ReShade::BackBuffer, texcoord).rgb;
 	float multiplier = max(((1 - strength * transmission)), 0.01);
-	output = (original.rgb - strength * transmission) * rcp(multiplier);
-	output = saturate(output.rgb);
+	output.rgb = (original.rgb - strength * transmission) / (multiplier);
+	output = float4(output.rgb, 1);
 }
 
 void BackBufferPS(float4 pos: SV_Position, float2 texcoord : TexCoord, out float3 output : SV_Target0)
 {
+	float depth = ReShade::GetLinearizedDepth(texcoord);
+	if(USEDEPTH == 1)
+	{
+		if(depth >= 1) discard;
+	}
 	output = tex2D(sFogRemoved, texcoord).rgb;
 }
 
 void TruncatedPrecisionPS(float4 pos: SV_Position, float2 texcoord : TexCoord, out float4 output : SV_Target0)
 {
+	float depth = ReShade::GetLinearizedDepth(texcoord);
+	if(USEDEPTH == 1)
+	{
+		if(depth >= 1) discard;
+	}
 	output = float4((tex2D(sFogRemoved, texcoord).rgb - tex2D(ReShade::BackBuffer, texcoord).rgb), 1);
 }
 
@@ -200,6 +211,7 @@ void FogReintroductionPS(float4 pos : SV_Position, float2 texcoord : TexCoord, o
 	}
 	float transmission = tex2D(sTransmission, texcoord).r;
 	float3 original = tex2D(ReShade::BackBuffer, texcoord).rgb + tex2D(sTruncatedPrecision, texcoord).rgb;
+	//float3 original = tex2D(sFogRemoved, texcoord).rgb;
 	float strength = saturate((pow(depth, 100 * DEPTHCURVE)) * STRENGTH);
 	float multiplier = max(((1 - strength * transmission)), 0.01);
 	output = original * multiplier + strength * transmission;
@@ -260,9 +272,10 @@ technique FogRemoval
 	pass TruncatedPrecision
 	{
 		VertexShader = PostProcessVS;
-		PixelShader = TrancatedPrecisionPS;
-		RenderTarget0 = TrancatedPrecision;
+		PixelShader = TruncatedPrecisionPS;
+		RenderTarget0 = TruncatedPrecision;
 	}
+	
 }
 
 technique FogReintroduction
