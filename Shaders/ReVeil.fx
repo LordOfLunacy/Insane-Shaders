@@ -221,6 +221,9 @@ void MeanAndVariancePS0(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, o
 	}
 	meanAndVariance = float2(sum, squaredSum);
 	skewness = cubedSum;
+#if USE_KURTOSIS != 0
+	kurtosis = quadSum;
+#endif
 }
 
 #if USE_KURTOSIS != 0
