@@ -11,8 +11,9 @@ refined using 2 passes over an iterative guided Wiener filter ran on the image d
 The purpose of the Wiener filters is to minimize the root mean square error between
 the given dark channel, and the true dark channel, making the removal more accurate.
 
-The airlight of the image is estimated by using the local dark channel mean, and 
-adding to it a set multiple of the standard deviations in the image.
+The airlight of the image is estimated by using the max values that appears in the each
+window of the dark channel. This window is then averaged together with every mip level
+that is larger than the current window size.
 
 Koschmeider's airlight equation is then used to remove the veil from the image, and the inverse
 is applied to reverse this affect, blending any new image components with the fog.
@@ -24,7 +25,7 @@ Gibson, Kristofor & Nguyen, Truong. (2013). Fast single image fog removal using 
 */
 
 #ifndef WINDOW_SIZE
-	#define WINDOW_SIZE 22
+	#define WINDOW_SIZE 15
 #endif
 
 #if WINDOW_SIZE > 1023
@@ -74,6 +75,8 @@ texture Airlight {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R16f;};
 texture Transmission {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R16f;};
 texture FogRemoved {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16f;};
 texture TruncatedPrecision {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16f;};
+texture Maximum0 {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R16f;};
+texture Maximum1 {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R16f; MipLevels = MAX_MIP;};
 
 
 sampler sBackBuffer {Texture = BackBuffer;};
@@ -86,18 +89,8 @@ sampler sTransmission {Texture = Transmission;};
 sampler sAirlight {Texture = Airlight;};
 sampler sTruncatedPrecision {Texture = TruncatedPrecision;};
 sampler sFogRemoved {Texture = FogRemoved;};
-
-
-uniform float StandardDeviations<
-	ui_type = "slider";
-	ui_label = "Airlight Standard Deviations";
-	ui_tooltip = "How many standard deviations are added to the dark channel mean to approximate\n"
-				"the airlight value. If airlight is set correctly, the final image will only be\n"
-				"slightly darker than the image before removal. If there are any parts of the \n"
-				"image that appear to be highlighted by the removal, this likely means that it\n"
-				"set too low.";
-	ui_min = 0; ui_max = 10;
-> = 3.5;
+sampler sMaximum0 {Texture = Maximum0;};
+sampler sMaximum1 {Texture = Maximum1;};
 
 uniform float TransmissionMultiplier<
 	ui_type = "slider";
@@ -115,13 +108,6 @@ uniform float DepthMultiplier<
 				"unaffected by depth.";
 	ui_min = -1; ui_max = 1;
 > = -0.075;
-
-uniform bool UseAverageVariance<
-	ui_label = "Use Average Variance for Standard Deviations";
-	ui_tooltip = "Selects whether the local variance, or the global average of the local variance\n"
-				"is used for calculating the standard deviation used in estimating the airlight.\n"
-				"Using the local variance is more mathematically correct, but may cause haloing.";
-> = true;
 
 uniform bool IgnoreSky<
 	ui_label = "Ignore Sky";
@@ -142,12 +128,12 @@ void DarkChannelPS1(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, out f
 	darkChannel = min(min(color.r, color.g), color.b);
 }
 
-void MeanAndVariancePS0(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, out float2 meanAndVariance : SV_TARGET0)
+void MeanAndVariancePS0(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, out float2 meanAndVariance : SV_TARGET0, out float maximum : SV_TARGET1)
 {
 	float darkChannel;
 	float sum = 0;
 	float squaredSum = 0;
-	[unroll]
+	maximum = 0;
 	for(int i = -(WINDOW_SIZE / 2); i < ((WINDOW_SIZE + 1) / 2); i++)
 	{
 			float2 offset = float2(i * BUFFER_RCP_WIDTH, 0);
@@ -156,26 +142,28 @@ void MeanAndVariancePS0(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, o
 			float darkChannelCubed = darkChannelSquared * darkChannel;
 			sum += darkChannel;
 			squaredSum += darkChannelSquared;
+			maximum = max(maximum, darkChannel);
 			
 	}
 	meanAndVariance = float2(sum, squaredSum);
 }
 
 
-void MeanAndVariancePS1(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, out float mean : SV_TARGET0, out float variance : SV_TARGET1)
+void MeanAndVariancePS1(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, out float mean : SV_TARGET0, out float variance : SV_TARGET1, out float maximum : SV_TARGET2)
 {
 	float2 meanAndVariance;
 	float sum = 0;
 	float squaredSum = 0;
 	float cubedSum = 0;
 	float quadSum = 0;
-	[unroll]
+	maximum = 0;
 	for(int i = -(WINDOW_SIZE / 2); i < ((WINDOW_SIZE + 1) / 2); i++)
 	{
 			float2 offset = float2(0, i * BUFFER_RCP_HEIGHT);
 			meanAndVariance = tex2D(sMeanAndVariance, texcoord + offset).rg;
 			sum += meanAndVariance.r;
 			squaredSum += meanAndVariance.g;
+			maximum = max(maximum, tex2D(sMaximum0, texcoord + offset).r);
 	}
 	float sumSquared = sum * sum;
 	
@@ -184,18 +172,20 @@ void MeanAndVariancePS1(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, o
 	variance /= WINDOW_SIZE_SQUARED;
 }
 
-void MeanAndVariancePS2(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, out float variance : SV_TARGET0)
+void MeanAndVariancePS2(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, out float variance : SV_TARGET0, out float maximum : SV_TARGET1)
 {
 	float2 meanAndVariance;
 	float sum = 0;
 	float squaredSum = 0;
-	[unroll]
+	maximum = 0;
+	
 	for(int i = -(WINDOW_SIZE / 2); i < ((WINDOW_SIZE + 1) / 2); i++)
 	{
 			float2 offset = float2(0, i * BUFFER_RCP_HEIGHT);
 			meanAndVariance = tex2D(sMeanAndVariance, texcoord + offset).rg;
 			sum += meanAndVariance.r;
 			squaredSum += meanAndVariance.g;
+			maximum = max(maximum, tex2D(sMaximum0, texcoord + offset).r);
 	}
 	float sumSquared = sum * sum;
 	
@@ -210,15 +200,20 @@ void WienerFilterPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, out f
 	float variance = tex2D(sVariance, texcoord).r;
 	float noise = tex2Dlod(sVariance, float4(texcoord, 0, MAX_MIP - 1)).r;
 	float darkChannel = tex2D(sDarkChannel, texcoord).r;
+	float maximum = 0;
+	for(int i = log2(WINDOW_SIZE); i < MAX_MIP; i++)
+	{
+		maximum += tex2Dlod(sMaximum1, float4(texcoord, 0, i)).r;
+	}
+	maximum /= MAX_MIP - log2(WINDOW_SIZE);
 	
 	float filter = saturate((max((variance - noise), 0) / variance) * (darkChannel - mean));
 	float veil = saturate(mean + filter);
 	//filter = ((variance - noise) / variance) * (darkChannel - mean);
 	//mean += filter;
 	float usedVariance = variance;
-	if (UseAverageVariance) usedVariance = noise;
 	
-	airlight = max(saturate(mean + sqrt(usedVariance) * StandardDeviations), 0.05);
+	airlight = clamp(maximum, 0.05, 1);//max(saturate(mean + sqrt(usedVariance) * StandardDeviations), 0.05);
 	transmission = (1 - ((veil * darkChannel) / airlight));
 	transmission *= (exp(DepthMultiplier * ReShade::GetLinearizedDepth(texcoord)));
 	transmission *= exp(TransmissionMultiplier);
@@ -231,16 +226,20 @@ void WienerFilterPS1(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, out 
 	float variance = tex2D(sVariance, texcoord).r;
 	float noise = tex2Dlod(sVariance, float4(texcoord, 0, MAX_MIP - 1)).r;
 	float darkChannel = tex2D(sDarkChannel, texcoord).r;
-	
+	float maximum = 0;
+	for(int i = log2(WINDOW_SIZE); i < MAX_MIP; i++)
+	{
+		maximum += tex2Dlod(sMaximum1, float4(texcoord, 0, i)).r;
+	}
+	maximum /= MAX_MIP - log2(WINDOW_SIZE);	
 	float filter = saturate((max((variance - noise), 0) / variance) * (darkChannel - mean));
 	float veil = saturate(mean + filter);
 	//filter = ((variance - noise) / variance) * (darkChannel - mean);
 	//mean += filter;
 	float usedVariance = variance;
-	if (UseAverageVariance) usedVariance = noise;
 	
-	airlight = max(saturate(darkChannel + sqrt(usedVariance) * StandardDeviations), 0.05);
-	transmission = (1 - ((veil * darkChannel) / airlight));
+	airlight = clamp(maximum, 0.05, 1);//max(saturate(mean + sqrt(usedVariance) * StandardDeviations), 0.05);
+	transmission = (1 - ((veil * veil) / airlight));
 
 }
 
@@ -294,9 +293,11 @@ void FogReintroductionPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, 
 
 technique Veil_B_Gone<ui_tooltip = "Place this shader technique before any effects you wish to be placed behind the image veil.\n\n"
 									"Veil_B_Back needs to be ran after this technique to reintroduce the image veil. The default\n"
-									"WINDOW_SIZE is 22, a smaller size means more performance, but also lower quality. If just for\n"
-									"a screenshot, you may want to set a larger kernel size (128+) as this will reduce the chances\n"
-									"of halo artifacts occuring.";>
+									"WINDOW_SIZE is 15, a smaller size means more performance, but also lower quality. Another \n"
+									"important thing to note when changing window sizes is that due to the way mipmaps are used in\n"
+									"this shader, whenever the WINDOW_SIZE surpasses a power of 2 (2, 4, 8, 16, 32, etc.), it \n"
+									"results in the shader having a massive shift in color and brightness. For this reason its \n"
+									"recommended these values be avoided.";>
 {
 	pass DarkChannel
 	{
@@ -310,6 +311,7 @@ technique Veil_B_Gone<ui_tooltip = "Place this shader technique before any effec
 		VertexShader = PostProcessVS;
 		PixelShader = MeanAndVariancePS0;
 		RenderTarget0 = MeanAndVariance;
+		RenderTarget1 = Maximum0;
 	}
 	
 	pass MeanAndVariance
@@ -318,6 +320,7 @@ technique Veil_B_Gone<ui_tooltip = "Place this shader technique before any effec
 		PixelShader = MeanAndVariancePS1;
 		RenderTarget0 = Mean;
 		RenderTarget1 = Variance;
+		RenderTarget2 = Maximum1;
 	}
 	
 	pass WienerFilter
@@ -353,6 +356,7 @@ technique Veil_B_Gone<ui_tooltip = "Place this shader technique before any effec
 		VertexShader = PostProcessVS;
 		PixelShader = MeanAndVariancePS0;
 		RenderTarget0 = MeanAndVariance;
+		RenderTarget1 = Maximum0;
 	}
 	
 	pass MeanAndVariance
@@ -360,6 +364,7 @@ technique Veil_B_Gone<ui_tooltip = "Place this shader technique before any effec
 		VertexShader = PostProcessVS;
 		PixelShader = MeanAndVariancePS2;
 		RenderTarget0 = Variance;
+		RenderTarget1 = Maximum1;
 	}
 	
 	pass WienerFilter
