@@ -170,7 +170,7 @@ void OutputPS(float4 pos : SV_Position, float2 texcoord : Texcoord, out float4 c
 	}
 	else if (Debug == 2)
 	{
-		color = tex2Dfetch(sFFTReal, float4(coord, 0, 0));
+		color = tex2Dfetch(sFFTImaginary, float4(coord, 0, 0));
 	}
 	else
 	{
