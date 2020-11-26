@@ -29,6 +29,10 @@ Ported By: Lord of Lunacy
 	#define IMPORT_IMAGE 0
 #endif
 
+#ifndef USE_LUMA_IMAGE
+	#define USE_LUMA_IMAGE 1
+#endif
+
 #ifndef IMAGE_FILENAME
 	#define IMAGE_FILENAME "image.png"
 #endif
@@ -72,11 +76,19 @@ Ported By: Lord of Lunacy
 #define DISPATCHSIZE uint2((BUFFER_WIDTH / LENGTH) + 1, (BUFFER_HEIGHT / LENGTH) + 1)
 #define DISPATCH_RES uint2(DISPATCHSIZE * LENGTH)
 
-//Preserve memory bandwidth by using half-precision when possible
-#if BUTTERFLY_COUNT <= 8
-	#define FORMAT RGBA16f
+//Preserve memory bandwidth by using half-precision or a smaller texture format when possible
+#if USE_LUMA_IMAGE != 0
+	#if BUTTERFLY_COUNT <= 8
+		#define FORMAT R16f
+	#else
+		#define FORMAT R32f
+	#endif
 #else
-	#define FORMAT RGBA32f
+	#if BUTTERFLY_COUNT <= 8
+		#define FORMAT RGBA16f
+	#else
+		#define FORMAT RGBA32f
+	#endif
 #endif
 
 //Use a LUT for weights and indices if desired
@@ -114,7 +126,8 @@ uniform int Debug<
 	ui_type = "combo";
 	ui_category = "Debug";
 	ui_label = "Debug";
-	ui_items = "Inverse FFT \0FFT Real Numbers \0FFT Imaginary Numbers \0Input Image \0";
+	ui_items = "Inverse FFT \0FFT Real Numbers \0FFT Imaginary Numbers \0"
+			   "Log-Magnitude \0Phase \0Input Image \0";
 > = 0;
 
 
@@ -157,6 +170,41 @@ void PostProcessVS(in uint id : SV_VertexID, out float4 position : SV_Position, 
 	position = float4(texcoord * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
 }
 
+#if USE_LUMA_IMAGE != 0
+void OutputPS(float4 pos : SV_Position, float2 texcoord : Texcoord, out float4 color : SV_Target)
+{
+	uint2 coord = texcoord.xy * float2(BUFFER_WIDTH, BUFFER_HEIGHT);
+	if(Debug == 0)
+	{
+		color = tex2Dfetch(sInverseFFT, float4(coord, 0, 0)).xxxx;
+	}
+	else if (Debug == 1)
+	{
+		color = tex2Dfetch(sFFTReal, float4(coord, 0, 0)).xxxx;
+	}
+	else if (Debug == 2)
+	{
+		color = tex2Dfetch(sFFTImaginary, float4(coord, 0, 0)).xxxx;
+	}
+	else if (Debug == 3)
+	{
+		float4 a = tex2Dfetch(sFFTReal, float4(coord, 0, 0)).xxxx;
+		float4 b = tex2Dfetch(sFFTImaginary, float4(coord, 0, 0)).xxxx;
+		color = log10(sqrt((a * a) + (b * b)));
+	}
+	else if (Debug == 4)
+	{
+		float4 a = tex2Dfetch(sFFTReal, float4(coord, 0, 0)).xxxx;
+		float4 b = tex2Dfetch(sFFTImaginary, float4(coord, 0, 0)).xxxx;
+		color = atan2(b, a);
+	}
+	else
+	{
+		discard;
+		//color = tex2Dfetch(sSourceImage, float4(coord, 0, 0));
+	}
+}
+#else
 void OutputPS(float4 pos : SV_Position, float2 texcoord : Texcoord, out float4 color : SV_Target)
 {
 	uint2 coord = texcoord.xy * float2(BUFFER_WIDTH, BUFFER_HEIGHT);
@@ -172,11 +220,24 @@ void OutputPS(float4 pos : SV_Position, float2 texcoord : Texcoord, out float4 c
 	{
 		color = tex2Dfetch(sFFTImaginary, float4(coord, 0, 0));
 	}
+	else if (Debug == 3)
+	{
+		float4 a = tex2Dfetch(sFFTReal, float4(coord, 0, 0));
+		float4 b = tex2Dfetch(sFFTImaginary, float4(coord, 0, 0));
+		color = log10(sqrt((a * a) + (b * b)));
+	}
+	else if (Debug == 4)
+	{
+		float4 a = tex2Dfetch(sFFTReal, float4(coord, 0, 0));
+		float4 b = tex2Dfetch(sFFTImaginary, float4(coord, 0, 0));
+		color = atan2(b, a);
+	}
 	else
 	{
-		color = tex2Dfetch(sSourceImage, float4(coord, 0, 0));
+		discard;
 	}
 }
+#endif
 
 #if BUTTERFLY_LUT != 0
 void ButterflyLUTCS(uint3 id : SV_DispatchThreadID, uint3 tid : SV_GroupThreadID)
@@ -190,6 +251,118 @@ void ButterflyLUTCS(uint3 id : SV_DispatchThreadID, uint3 tid : SV_GroupThreadID
 }
 #endif
 
+#if USE_LUMA_IMAGE != 0
+groupshared float pingPongArray[4 * THREADS];
+void ButterflyPass(int passIndex, uint x, uint y, uint t0, uint t1, out float resultR, out float resultI, bool transformInverse)
+{
+	uint2 Indices;
+	float2 Weights;
+#if BUTTERFLY_LUT != 0
+	float4 IndicesAndWeights = tex2Dfetch(sButterflyLUT, float4(uint2(x, passIndex), 0, 0));
+	Indices = IndicesAndWeights.xy;
+	Weights = IndicesAndWeights.zw;
+#else
+	GetButterflyValues(passIndex, x, Indices, Weights);
+#endif
+	uint pingPongIndexR1 = (Indices.x * 4) + t0 + (y * LENGTH * 4);
+	uint pingPongIndexI1 = (Indices.x * 4) + t1 + (y * LENGTH * 4);
+	uint pingPongIndexR2 = (Indices.y * 4) + t0 + (y * LENGTH * 4);
+	uint pingPongIndexI2 = (Indices.y * 4) + t1 + (y * LENGTH * 4);
+
+	float inputR1 = pingPongArray[pingPongIndexR1];
+	float inputI1 = pingPongArray[pingPongIndexI1];
+
+	float inputR2 = pingPongArray[pingPongIndexR2];
+	float inputI2 = pingPongArray[pingPongIndexI2];
+
+	if(transformInverse)
+	{
+		resultR = (inputR1 + Weights.x * inputR2 + Weights.y * inputI2) * 0.5;
+		resultI = (inputI1 - Weights.y * inputR2 + Weights.x * inputI2) * 0.5;
+	}
+	else
+	{
+		resultR = inputR1 + Weights.x * inputR2 - Weights.y * inputI2;
+		resultI = inputI1 + Weights.y * inputR2 + Weights.x * inputI2;
+	}
+}
+
+void ButterflyPassFinalNoI(int passIndex, int x, int y, int t0, int t1, out float3 resultR)
+{
+	uint2 Indices;
+	float2 Weights;
+	GetButterflyValues(passIndex, x, Indices, Weights);
+
+	float3 inputR1 = pingPongArray[t0 + (Indices.x * 4)+ (y * LENGTH * 4)];
+
+	float3 inputR2 = pingPongArray[t0 + (Indices.y * 4)+ (y * LENGTH * 4)];
+	float3 inputI2 = pingPongArray[t1 + (Indices.y * 4)+ (y * LENGTH * 4)];
+
+	resultR = (inputR1 + Weights.x * inputR2 + Weights.y * inputI2) * 0.5;
+}
+
+
+
+void ButterflySLM(uint3 id : SV_DispatchThreadID, uint3 position : SV_GroupThreadID, bool rowPass, bool transformInverse, sampler sReal, sampler sImaginary, storage wReal, storage wImaginary)
+{
+	uint2 texturePos;
+	uint row = position.y;
+	if(rowPass)
+	{
+		texturePos = uint2( id.xy );
+	}
+	else
+	{
+		texturePos = uint2( id.yx );
+	}
+
+	// Load entire row or column into scratch array
+	if(rowPass && !transformInverse)
+	{
+		pingPongArray[0 + (position.x * 4) + (position.y * LENGTH * 4)].x = dot(tex2Dfetch(sReal, float4(texturePos, 0, 0)).rgb, float3(0.299, 0.587, 0.114));
+		// don't load values from the imaginary texture when loading the original texture
+		pingPongArray[1 + (position.x * 4) + (position.y * LENGTH * 4)].x = 0;
+	}
+	else
+	{
+		pingPongArray[0 + (position.x * 4) + (position.y * LENGTH * 4)].x = tex2Dfetch(sReal, float4(texturePos, 0, 0)).x;
+		pingPongArray[1 + (position.x * 4) + (position.y * LENGTH * 4)].x = tex2Dfetch(sImaginary, float4(texturePos, 0, 0)).x;
+	}
+	
+	uint4 textureIndices = uint4(0, 1, 2, 3);
+
+	
+	for (int i = 0; i < BUTTERFLY_COUNT - 1; i++)
+	{
+		barrier();
+		ButterflyPass( i, position.x, position.y, textureIndices.x, textureIndices.y,
+			pingPongArray[textureIndices.z + (position.x * 4) + (position.y * LENGTH * 4)].x,
+			pingPongArray[textureIndices.w + (position.x * 4) + (position.y * LENGTH * 4)].x,
+			transformInverse);
+		textureIndices.xyzw = textureIndices.zwxy;
+	}
+
+	// Final butterfly will write directly to the target texture
+	barrier();
+	float3 real;
+	float3 imaginary;
+
+	// The final pass writes to the output UAV texture
+	if(!rowPass && transformInverse)
+	{
+		// last pass of the inverse transform. The imaginary value is no longer needed
+		ButterflyPassFinalNoI(BUTTERFLY_COUNT - 1, position.x, position.y, textureIndices.x, textureIndices.y, real);
+		tex2Dstore(wReal, texturePos, float4(real.xxx, 1));
+	}
+	else
+	{
+		ButterflyPass(BUTTERFLY_COUNT - 1, position.x, position.y, textureIndices.x, textureIndices.y, real, imaginary, transformInverse);
+		tex2Dstore(wReal, texturePos, float4(real.xxx, 1));
+		tex2Dstore(wImaginary, texturePos, float4(imaginary.xxx, 1));
+	}
+
+}
+#else
 groupshared float3 pingPongArray[4 * THREADS];
 void ButterflyPass(int passIndex, uint x, uint y, uint t0, uint t1, out float3 resultR, out float3 resultI, bool transformInverse)
 {
@@ -297,6 +470,7 @@ void ButterflySLM(uint3 id : SV_DispatchThreadID, uint3 position : SV_GroupThrea
 	}
 
 }
+#endif
 
 void RowCS(uint3 id : SV_DispatchThreadID, uint3 position : SV_GroupThreadID)
 {
