@@ -128,16 +128,6 @@ groupshared float FFX_VariableShading_LdsMax[FFX_VariableShading_SampleCount];
 
 float FFX_VariableShading_GetLuminance(int2 pos)
 {
-    float2 v = FFX_VariableShading_ReadMotionVec2D(pos);
-    pos = pos - round(v);
-    // clamp to screen
-    if (pos.x < 0) pos.x = 0;
-    if (pos.y < 0) pos.y = 0;
-    if (pos.x >= g_Resolution.x) pos.x = g_Resolution.x - 1;
-    if (pos.y >= g_Resolution.y) pos.y = g_Resolution.y - 1;
-	
-
-
     return FFX_VariableShading_ReadLuminance(pos);
 }
 
