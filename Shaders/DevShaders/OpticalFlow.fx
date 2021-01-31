@@ -30,8 +30,8 @@ namespace OpticalFlow
 texture BackBuffer : COLOR;
 texture Output {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGB10A2;};
 texture PrevBackBuffer {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGB10A2;};
-texture PrevSAD {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R16f; MipLevels = MIP_LEVELS;};
-texture CurrSAD {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R16f; MipLevels = MIP_LEVELS;};
+texture PrevSAD {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R8; MipLevels = MIP_LEVELS;};
+texture CurrSAD {Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = R8; MipLevels = MIP_LEVELS;};
 texture Motion0 {Width = BUFFER_SIZE0.x; Height = BUFFER_SIZE0.y; Format = RG8;};
 texture Motion1 {Width = BUFFER_SIZE1.x; Height = BUFFER_SIZE1.y; Format = RG8;};
 texture Motion2 {Width = BUFFER_SIZE2.x; Height = BUFFER_SIZE2.y; Format = RG8;};
@@ -117,6 +117,7 @@ float3 BSplineBicubicFilter(sampler sTexture, float2 texcoord)
 		 +  tex2D(sTexture, float2(t1.x, t0.y)).rgb * s1.x) * s0.y
 		 + (tex2D(sTexture, float2(t0.x, t1.y)).rgb * s0.x
 		 +  tex2D(sTexture, float2(t1.x, t1.y)).rgb * s1.x) * s1.y;
+		 //return tex2D(sTexture, texcoord).rgb;
 
 }
 
@@ -130,9 +131,9 @@ void PostProcessVS(in uint id : SV_VertexID, out float4 position : SV_Position, 
 
 void CurrToPrevPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out float prevSAD : SV_Target0)
 {
-	//prevSAD = tex2Dfetch(sCurrSAD, floor(texcoord * BUFFER_SIZE5)).x;
-	float2 coord = floor(texcoord * BUFFER_SIZE5);
-	prevSAD = dot(tex2Dfetch(sPrevBackBuffer, coord).rgb, float3(0.299, 0.587, 0.114));
+	prevSAD = tex2Dfetch(sCurrSAD, floor(texcoord * BUFFER_SIZE5)).x;
+	//float2 coord = floor(texcoord * BUFFER_SIZE5);
+	//prevSAD = dot(tex2Dfetch(sPrevBackBuffer, coord).rgb, float3(0.299, 0.587, 0.114));
 }
 
 void OutputPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out float3 output : SV_Target0)
@@ -143,11 +144,11 @@ void OutputPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out float3 o
 void PrevToCurrPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out float4 color : SV_Target0, out float4 history : SV_Target1)
 {
 #if OPTICAL_FLOW_SUBPIXEL != 0
-	float scaleFactor = 63.5;
-	float2 motionVector = (BSplineBicubicFilter(sMotion6, texcoord) - 0.5).xy * scaleFactor;//tex2Dlod(sMotion5, float4(texcoord, 0, 1));
+	float scaleFactor = 128;
+	float2 motionVector = ((BSplineBicubicFilter(sMotion6, texcoord)) - 0.5).xy * scaleFactor;//tex2Dlod(sMotion5, float4(texcoord, 0, 1));
 #else
-	float scaleFactor = 127.5;
-	float2 motionVector = (BSplineBicubicFilter(sMotion5, texcoord) - 0.5).xy * scaleFactor;//tex2Dlod(sMotion5, float4(texcoord, 0, 1));
+	float scaleFactor = 256;
+	float2 motionVector = ((BSplineBicubicFilter(sMotion5, texcoord)) - 0.5).xy * scaleFactor;//tex2Dlod(sMotion5, float4(texcoord, 0, 1));
 #endif
 	
 	if(Debug == 0)
@@ -218,8 +219,6 @@ void PrevToCurrPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out floa
 	{
 		float3 prevR = tex2Dfetch(sPrevBackBuffer, floor(texcoord * BUFFER_SIZE5) + motionVector).rgb;
 		float3 curr = tex2Dfetch(sBackBuffer, floor(texcoord * BUFFER_SIZE5)).rgb;
-		float prevLumaR = dot(prevR, float3(0.299, 0.587, 0.114));
-		float currLuma = dot(curr, float3(0.299, 0.587, 0.114));
 		//color.b = tex2Dfetch(sCurrSAD, floor(texcoord * BUFFER_SIZE5)).xx;
 		//color.rg = tex2Dfetch(sPrevSAD, floor(texcoord * BUFFER_SIZE5) + motionVector).xx;
 		if(dot(abs(prevR - curr), float3(0.299, 0.587, 0.114)) <= ReprojectionThreshold)
@@ -230,7 +229,6 @@ void PrevToCurrPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out floa
 		else
 		{
 			float3 prev = tex2Dfetch(sPrevBackBuffer, floor(texcoord * BUFFER_SIZE5)).rgb;
-			float prevLuma = dot(prev, float3(0.299, 0.587, 0.114));
 			if(dot(abs(prev - curr), float3(0.299, 0.587, 0.114)) <= ReprojectionThreshold)
 			{
 				history = float4(lerp(prev, curr, ReprojectionBlending), 1);
@@ -254,7 +252,7 @@ void PrevToCurrPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out floa
 	color.a = 1;
 }
 
-void PreparationPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out float currSAD : SV_Target0)
+void PreparationPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out float currSAD : SV_Target0, out float prevSAD : SV_Target1)
 {
 	float2 coord = floor(texcoord * BUFFER_SIZE5);
 	
@@ -281,8 +279,9 @@ void PreparationPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out flo
 	
 	currSAD /= 16;*/
 	currSAD = dot(tex2Dfetch(sBackBuffer, coord).rgb, float3(0.299, 0.587, 0.114));
+	prevSAD = dot(tex2Dfetch(sPrevBackBuffer, coord).rgb, float3(0.299, 0.587, 0.114));
 	
-	//currSAD = ReShade::GetLinearizedDepth(texcoord);
+	//currSAD = length(float2(currSAD, ReShade::GetLinearizedDepth(texcoord)));
 	
 	/*currSAD = dot(tex2Dfetch(sBackBuffer, coord + float2(-0.5, -0.5)).rgb, float3(0.299, 0.587, 0.114));
 	currSAD += dot(tex2Dfetch(sBackBuffer, coord + float2(-0.5, 0.5)).rgb, float3(0.299, 0.587, 0.114));
@@ -291,33 +290,24 @@ void PreparationPS(float4 pos : SV_Position, float2 texcoord : TEXCOORD, out flo
 	currSAD /= 4;*/
 }
 
-float2 MotionVector(const bool firstPass, const float2 texcoord, const float2 bufferSize, const sampler sPreviousVector, const int mipLevel, const float centerBias)
+float2 MotionVector(const bool firstPass, float2 texcoord, const float2 bufferSize, const sampler sPreviousVector, const int mipLevel, const float centerBias)
 {
 	float2 motionVectorPrev = 0;
 	if(!firstPass)
 	{
 		//motionVectorPrev = (tex2Dfetch(sPreviousVector, floor((texcoord * bufferSize) / 2)).xy - 0.5) * 255.5;
 		//motionVectorPrev = (BSplineBicubicFilter(sPreviousVector, texcoord).xy - 0.5) * 255.5;
-		motionVectorPrev = (tex2D(sPreviousVector, /*floor((texcoord * bufferSize) / 2)/ (bufferSize / 2)*/texcoord).xy - 0.5) * 255.5;
+		motionVectorPrev = ((tex2D(sPreviousVector, /*floor((texcoord * bufferSize) / 2)/ (bufferSize / 2)*/texcoord).xy - 0.5)) * (256 / bufferSize);
 	}
 	float2 coord = floor(texcoord * bufferSize);
 	float currReference;
 	float prevReference = 0;
-	float reprojectedCenter;
-	if(mipLevel != -1)
+	float reprojectedCenter = 0;
+	currReference = tex2Dlod(sCurrSAD, float4(texcoord, 0, mipLevel)).x;
+	if(!firstPass)
 	{
-		currReference = tex2Dlod(sCurrSAD, float4(texcoord, 0, mipLevel)).x;
-		if(!firstPass)
-		{
-			prevReference = tex2Dlod(sPrevSAD, float4(texcoord, 0, mipLevel)).x;
-			reprojectedCenter = tex2Dlod(sPrevSAD, float4(texcoord + (motionVectorPrev / 255.5), 0, mipLevel)).x;
-		}
-	}
-	else
-	{
-		currReference = BSplineBicubicFilter(sCurrSAD, texcoord).x;
-		prevReference = BSplineBicubicFilter(sPrevSAD, (texcoord)).x;
-		reprojectedCenter = BSplineBicubicFilter(sPrevSAD, texcoord + (motionVectorPrev / 255.5)).x;
+		prevReference = tex2Dlod(sPrevSAD, float4(texcoord, 0, mipLevel)).x;
+		reprojectedCenter = tex2Dlod(sPrevSAD, float4(texcoord + (motionVectorPrev), 0, mipLevel)).x;
 	}
 	
 	//check the validity of the previous motion vector estimate
@@ -326,7 +316,7 @@ float2 MotionVector(const bool firstPass, const float2 texcoord, const float2 bu
 		motionVectorPrev = 0;
 	}
 	
-	coord += motionVectorPrev;
+	texcoord += motionVectorPrev;
 	float minimum = 2;
 	float2 motionVector;
 	
@@ -336,31 +326,32 @@ float2 MotionVector(const bool firstPass, const float2 texcoord, const float2 bu
 		[unroll]
 		for(int j = -1; j <= 1; j++)
 		{
-			float2 sampleCoord = (coord + float2(i, j))/bufferSize;
-			if(!(any(sampleCoord < 0) || any(sampleCoord >= bufferSize)))
+			//float2 sampleCoord = texcoord + (float2(i, j) / bufferSize);
+			float2 offset = (float2(i, j) / bufferSize);
+			if((all((texcoord + offset) >= 0) || all((texcoord + offset) < 1)))
 			{
 				float compare;
-				if(mipLevel != -1)
+				//if(mipLevel != -1)
 				{
-					compare = abs(tex2Dlod(sPrevSAD, float4(sampleCoord, 0, mipLevel)).x - currReference);
+					compare = abs(tex2Dlod(sPrevSAD, float4((texcoord + offset), 0, mipLevel)).x - currReference);
 				}
-				else
+				/*else
 				{
 					compare = abs(BSplineBicubicFilter(sPrevSAD, sampleCoord).x - currReference.x);//abs(tex2Dlod(sPrevSAD, float4(sampleCoord, 0, mipLevel)).x - currReference);
-				}
+				}*/
 				if(all(int2(i, j) == 0))
 				{
 					compare -= centerBias;
 				}
 				if(compare < minimum)
 				{
-					motionVector = float2(i, j);
+					motionVector = float2(i, j) / (256);
 					minimum = compare;
 				}
 			}			
 		}	
 	}
-	return ((motionVector + motionVectorPrev)/127.5) + 0.5;
+	return (motionVector + motionVectorPrev * (bufferSize / 256)) + 0.5;
 }
 
 
@@ -385,7 +376,7 @@ void MotionVectorPS2(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, out f
 	float2 bufferSize = BUFFER_SIZE2;
 	uint mipLevel = 3;
 	float centerBias = (Threshold * exp2(mipLevel))  / (10);
-	motionVector = MotionVector(true, texcoord, bufferSize, sMotion1, mipLevel, centerBias);
+	motionVector = MotionVector(false, texcoord, bufferSize, sMotion1, mipLevel, centerBias);
 }
 
 void MotionVectorPS3(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, out float2 motionVector : SV_TARGET0)
@@ -424,18 +415,19 @@ void MotionVectorPS6(float4 pos : SV_POSITION, float2 texcoord : TEXCOORD, out f
 
 technique OpticalFlow
 {
-	pass
+	/*pass
 	{
 		VertexShader = PostProcessVS;
 		PixelShader = CurrToPrevPS;
 		RenderTarget0 = PrevSAD;
-	}
+	}*/
 	
 	pass
 	{
 		VertexShader = PostProcessVS;
 		PixelShader = PreparationPS;
 		RenderTarget0 = CurrSAD;
+		RenderTarget1 = PrevSAD;
 	}
 	
 	pass
