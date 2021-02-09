@@ -230,12 +230,7 @@ void TextureVS(uint id : SV_VertexID, out float4 vpos : SV_POSITION, out float2 
 	vpos = float4(texcoord * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
 	texcoord /= Zoom;
 	texcoord += (Zoom - 1) / (Zoom * 2);
-	texcoord += Center;
-	if(TextureSelection == 1)
-	{
-		texcoord.y /= float(float(BUFFER_WIDTH) / float(BUFFER_HEIGHT)) / CUSTOM_TEXTURE_ASPECT_RATIO;
-		texcoord *= (float(float(BUFFER_WIDTH) / float(BUFFER_HEIGHT)) / CUSTOM_TEXTURE_ASPECT_RATIO);
-	}
+	texcoord -= Center;
 }
 
 void DrawStringVS(uint id : SV_VertexID, out float4 vpos : SV_POSITION, out float2 texcoord : TEXCOORD, out float4 stringPointers[4] : TANGENT0)
@@ -244,7 +239,13 @@ void DrawStringVS(uint id : SV_VertexID, out float4 vpos : SV_POSITION, out floa
 	if(TextureSelection == 0)
 		debug = tex2Dfetch(sBackBuffer, floor(mouse_point) + 0.5).xyzw;
 	else
-		debug = tex2Dfetch(sCustomTexture, floor(mouse_point) + 0.5).xyzw;
+	{
+		float2 debugCoord = (mouse_point / float2(BUFFER_WIDTH, BUFFER_HEIGHT));
+		debugCoord /= Zoom;
+		debugCoord += (Zoom - 1) / (Zoom * 2);
+		debugCoord -= Center;
+		debug = tex2Dfetch(sCustomTexture, floor(debugCoord * CUSTOM_TEXTURE_SIZE) + 0.5).xyzw;
+	}
 	stringPointers[0] = generateString(debug.x);
 	stringPointers[1] = generateString(debug.y);
 	stringPointers[2] = generateString(debug.z);
@@ -263,7 +264,9 @@ void OutputPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, out float4 
 	if(TextureSelection == 0)
 		output = tex2Dfetch(sBackBuffer, floor(texcoord * float2(BUFFER_WIDTH, BUFFER_HEIGHT)) + 0.5);
 	else
+	{
 		output = tex2Dfetch(sCustomTexture, floor(texcoord * CUSTOM_TEXTURE_SIZE) + 0.5);
+	}
 }
 
 void DrawStringPS(float4 vpos : SV_POSITION, float2 texcoord : TEXCOORD, float4 stringPointers[4] : TANGENT0, out float3 output : SV_TARGET0)
