@@ -11,6 +11,11 @@
 
 #define TILE_COUNT (DISPATCH_X * DISPATCH_Y)
 
+uniform bool Show_Red = true;
+uniform bool Show_Green = true;
+uniform bool Show_Blue = true;
+uniform bool Show_Luma = true;
+
 namespace Histogram_Testing_999
 {
 	texture BackBuffer : COLOR;
@@ -132,19 +137,19 @@ namespace Histogram_Testing_999
 			{
 				
 				uint4 histogramBin = tex2D(sHistogram, float2(texcoord.x, 0.5)).rgba;
-				if(coord.y <= histogramBin.r)
+				if(coord.y <= histogramBin.r && Show_Red)
 				{
 					color = float4(1, 0, 0, 1);
 				}
-				else if(coord.y <= histogramBin.g)
+				else if(coord.y <= histogramBin.g && Show_Green)
 				{
 					color = float4(0, 1, 0, 1);
 				}
-				else if(coord.y <= histogramBin.b)
+				else if(coord.y <= histogramBin.b && Show_Blue)
 				{
 					color = float4(0, 0, 1, 1);
 				}
-				else if(coord.y <= histogramBin.a)
+				else if(coord.y <= histogramBin.a && Show_Luma)
 				{
 					color = float4(1, 1, 1, 1);
 				}
