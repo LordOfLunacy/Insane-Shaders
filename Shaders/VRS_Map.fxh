@@ -46,7 +46,9 @@
 */
 
 
-/*
+#if 0
+
+
 //--------------------------------------------------------------------------------------//
 // Common Intercept Code
 // (Copy and paste this code into your shader to help with interception of it)
@@ -80,29 +82,58 @@ static const uint VRS_RATE_4X4 = VRS_MAKE_SHADING_RATE(VRS_RATE1D_4X, VRS_RATE1D
 
 namespace VRS_Map
 {
-	uint ShadingRate(float2 texcoord, bool UseVRS)
-	{
-		return 0;
-	}
-	uint ShadingRate(float2 texcoord, float VarianceCutoff, bool UseVRS)
-	{
-		return 0;
-	}
+	/**
+	Determines the current shading rate using the uniform set by VariableRateShading for the VarianceCutoff
+	
+	@param texcoord The screenspace coordinate of the current sample
+	@param UseVRS Input for whether or not the uniform is currently being used
+	@param offState The shading rate that will be used when the VRS_Map is not active
+	
+	@return The shading rate to be used as determined by the function
+	*/
 	uint ShadingRate(float2 texcoord, bool UseVRS, uint offRate)
 	{
 		return offRate;
 	}
+	/**
+	Determines the current shading rate using a custom input for the variance cutoff.
+	
+	@param texcoord The screenspace coordinate of the current sample
+	@param VarianceCutoff The variance threshold that is used as a cutoff for when its safe to drop to a
+						  reduced shading rate (must be between 0 and 0.25).
+	@param UseVRS Input for whether or not the uniform is currently being used
+	@param offState The shading rate that will be used when the VRS_Map is not active
+	
+	@precondition VarianceCutoff must be between 0 and 0.25 otherwise the shading rate will be reduced everywhere.
+	
+	@return The shading rate to be used as determined by the function
+	*/
 	uint ShadingRate(float2 texcoord, float VarianceCutoff, bool UseVRS, uint offRate)
 	{
 		return offRate;
 	}
-	float3 DebugImage(float3 originalImage, float2 texcoord, float VarianceCutoff, bool DebugView)
+	
+	/**
+	Creates a debug view for the shading rate map
+	
+	@param originalImage The original image to overlay the debug view over
+	@param texcoord The screenspace coordinate of the current sample
+	@param VarianceCutoff The variance threshold that is used as a cutoff for when its safe to drop to a
+						  reduced shading rate
+	@param offState The shading rate that will be used when the VRS_Map is not active
+	@param DebugView Input for whether or not the debug view is currently enabled
+	
+	@return the original image with the debug view overtop
+	*/
+	float3 DebugImage(float3 originalImage, float2 texcoord, float VarianceCutoff, uint offState, bool DebugView)
 	{
 		return originalImage;
 	}
 }
 #endif //VRS_MAP
-*/
+//End of intercept code
+
+#endif
 
 #define RENDERER __RENDERER__
 
@@ -166,7 +197,135 @@ static const uint VRS_RATE_4X4 = VRS_MAKE_SHADING_RATE(VRS_RATE1D_4X, VRS_RATE1D
 
 namespace VRS_Map
 {
-	//uses the uniform set by VariableRateShading for the VarianceCutoff
+	
+	/**
+	Determines the current shading rate using the uniform set by VariableRateShading for the VarianceCutoff
+	
+	@param texcoord The screenspace coordinate of the current sample
+	@param UseVRS Input for whether or not the uniform is currently being used
+	@param offState The shading rate that will be used when the VRS_Map is not active
+	
+	@return The shading rate to be used as determined by the function
+	*/
+	uint ShadingRate(float2 texcoord, bool UseVRS, uint offState)
+	{
+		if(!VRS_IS_UPDATED || !UseVRS)
+		{
+			return offState;
+		}
+		else
+		{
+			return uint(tex2Dfetch(sVRS, int2(texcoord * VRS_IMAGE_SIZE)).w * 255);
+		}
+	}
+	
+	/**
+	Determines the current shading rate using a custom input for the variance cutoff,
+	the custom cutoff must be less than 0.25 otherwise the shading rate will be reduced everywhere.
+	
+	@param texcoord The screenspace coordinate of the current sample
+	@param VarianceCutoff The variance threshold that is used as a cutoff for when its safe to drop to a
+						  reduced shading rate (must be between 0 and 0.25).
+	@param UseVRS Input for whether or not the uniform is currently being used
+	@param offState The shading rate that will be used when the VRS_Map is not active
+	
+	@precondition VarianceCutoff must be between 0 and 0.25 otherwise the shading rate will be reduced everywhere.
+	
+	@return The shading rate to be used as determined by the function
+	*/
+	uint ShadingRate(float2 texcoord, float VarianceCutoff, bool UseVRS, uint offState)
+	{
+		if(!VRS_IS_UPDATED || !UseVRS)
+		{
+			return offState;
+		}
+		else
+		{
+			float3 variances = (tex2Dfetch(sVRS, int2(texcoord * VRS_IMAGE_SIZE)).xyz / 4);
+			float varH = variances.x;
+			float varV = variances.y;
+			float var = variances.z;
+			uint shadingRate = VRS_MAKE_SHADING_RATE(VRS_RATE1D_1X, VRS_RATE1D_1X);
+
+			if (var < VarianceCutoff)
+			{
+				shadingRate = VRS_MAKE_SHADING_RATE(VRS_RATE1D_2X, VRS_RATE1D_2X);
+			}
+			else
+			{
+				if (varH > varV)
+				{
+					shadingRate = VRS_MAKE_SHADING_RATE(VRS_RATE1D_1X, (varV > VarianceCutoff) ? VRS_RATE1D_1X : VRS_RATE1D_2X);
+				}
+				else
+				{
+					shadingRate = VRS_MAKE_SHADING_RATE((varH > VarianceCutoff) ? VRS_RATE1D_1X : VRS_RATE1D_2X, VRS_RATE1D_1X);
+				}
+			}
+			return shadingRate;
+		}
+	}
+	
+	/**
+	Creates a debug view for the shading rate map
+	
+	@param originalImage The original image to overlay the debug view over
+	@param texcoord The screenspace coordinate of the current sample
+	@param VarianceCutoff The variance threshold that is used as a cutoff for when its safe to drop to a
+						  reduced shading rate
+	@param offState The shading rate that will be used when the VRS_Map is not active
+	@param DebugView Input for whether or not the debug view is currently enabled
+	
+	@return the original image with the debug view overtop
+	*/
+	float3 DebugImage(float3 originalImage, float2 texcoord, float VarianceCutoff, uint offState, bool DebugView)
+	{
+		if(DebugView)
+		{
+			// encode different shading rates as colors
+			float3 color = float3(1, 1, 1);
+
+			switch (ShadingRate(texcoord, VarianceCutoff, true, offState))
+			{
+				case VRS_RATE_1X1:
+					color = float3(0.5, 0.0, 0.0);
+					break;
+				case VRS_RATE_1X2:
+					color = float3(0.5, 0.5, 0.0);
+					break;
+				case VRS_RATE_2X1:
+					color = float3(0.5, 0.25, 0.0);
+					break;
+				case VRS_RATE_2X2:
+					color = float3(0.0, 0.5, 0.0);
+					break;
+				case VRS_RATE_2X4:
+					color = float3(0.25, 0.25, 0.5);
+					break;
+				case VRS_RATE_4X2:
+					color = float3(0.5, 0.25, 0.5);
+					break;
+				case VRS_RATE_4X4:
+					color = float3(0.0, 0.5, 0.5);
+					break;
+			}
+			// add grid
+			color = lerp(color, originalImage, 0.35);
+			int2 grid = uint2(texcoord.xy * float2(BUFFER_WIDTH, BUFFER_HEIGHT)) % TILE_SIZE;
+			bool border = (grid.x == 0) || (grid.y == 0);
+			return color * (border ? 0.5f : 1.0f);
+		}
+		else
+		{
+			return originalImage;
+		}
+	}
+	
+	
+	
+	/**
+	Deprecated
+	*/
 	uint ShadingRate(float2 texcoord, bool UseVRS)
 	{
 		if(!VRS_IS_UPDATED || !UseVRS)
@@ -179,8 +338,9 @@ namespace VRS_Map
 		}
 	}
 	
-	//uses a custom input for the variance cutoff, the custom cutoff must be less than 0.25
-	//otherwise the shading rate will be reduced everywhere
+	/**
+	Deprecated
+	*/
 	uint ShadingRate(float2 texcoord, float VarianceCutoff, bool UseVRS)
 	{
 		if(!VRS_IS_UPDATED || !UseVRS)
@@ -214,55 +374,9 @@ namespace VRS_Map
 		}
 	}
 	
-	//uses the uniform set by VariableRateShading for the VarianceCutoff, also, it defines a custom shading rate that
-	//will be used when it is disabled rather than the default 0.
-	uint ShadingRate(float2 texcoord, bool UseVRS, uint offRate)
-	{
-		if(!VRS_IS_UPDATED || !UseVRS)
-		{
-			return offRate;
-		}
-		else
-		{
-			return uint(tex2Dfetch(sVRS, int2(texcoord * VRS_IMAGE_SIZE)).w * 255);
-		}
-	}
-	
-	//uses a custom input for the variance cutoff, the custom cutoff must be less than 0.25
-	//otherwise the shading rate will be reduced everywhere, also, it defines a custom shading rate that
-	//will be used when it is disabled rather than the default 0.
-	uint ShadingRate(float2 texcoord, float VarianceCutoff, bool UseVRS, uint offRate)
-	{
-		if(!VRS_IS_UPDATED || !UseVRS)
-		{
-			return offRate;
-		}
-		else
-		{
-			float3 variances = (tex2Dfetch(sVRS, int2(texcoord * VRS_IMAGE_SIZE)).xyz / 4);
-			float varH = variances.x;
-			float varV = variances.y;
-			float var = variances.z;
-			uint shadingRate = VRS_MAKE_SHADING_RATE(VRS_RATE1D_1X, VRS_RATE1D_1X);
-
-			if (var < VarianceCutoff)
-			{
-				shadingRate = VRS_MAKE_SHADING_RATE(VRS_RATE1D_2X, VRS_RATE1D_2X);
-			}
-			else
-			{
-				if (varH > varV)
-				{
-					shadingRate = VRS_MAKE_SHADING_RATE(VRS_RATE1D_1X, (varV > VarianceCutoff) ? VRS_RATE1D_1X : VRS_RATE1D_2X);
-				}
-				else
-				{
-					shadingRate = VRS_MAKE_SHADING_RATE((varH > VarianceCutoff) ? VRS_RATE1D_1X : VRS_RATE1D_2X, VRS_RATE1D_1X);
-				}
-			}
-			return shadingRate;
-		}
-	}
+	/**
+	Deprecated
+	*/
 	float3 DebugImage(float3 originalImage, float2 texcoord, float VarianceCutoff, bool DebugView)
 	{
 		if(DebugView)
@@ -270,7 +384,7 @@ namespace VRS_Map
 			// encode different shading rates as colors
 			float3 color = float3(1, 1, 1);
 
-			switch (ShadingRate(texcoord, VarianceCutoff, true))
+			switch (ShadingRate(texcoord, VarianceCutoff, true, 0))
 			{
 				case VRS_RATE_1X1:
 					color = float3(0.5, 0.0, 0.0);
