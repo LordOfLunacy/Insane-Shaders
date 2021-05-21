@@ -46,7 +46,7 @@
 // to allow lower VS rates on fast moving objects
 //
 //////////////////////////////////////////////////////////////////////////
-#define __SUPPORTED_VRS_MAP_COMPATIBILITY__ 10
+#define __SUPPORTED_VRS_MAP_COMPATIBILITY__ 11
 
 #if exists "VRS_Map.fxh"                                          
     #include "VRS_Map.fxh"
