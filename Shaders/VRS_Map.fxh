@@ -53,7 +53,7 @@
 // Common Intercept Code
 // (Copy and paste this code into your shader to help with interception of it)
 //--------------------------------------------------------------------------------------//
-#define __SUPPORTED_VRS_MAP_COMPATIBILITY__ 10
+#define __SUPPORTED_VRS_MAP_COMPATIBILITY__ 11
 
 #if exists "VRS_Map.fxh"                                          
     #include "VRS_Map.fxh"
