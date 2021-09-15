@@ -27,8 +27,8 @@ anisotropic kuwahara filter which is an edge aware denoising filter commonly use
 [Image Comparison](https://imgsli.com/NzE1NTI)
 
 **SharpContrast** is a sharpen shader that entered development after doing some testing on the Kuwahara filter
-used in Oilify. It is different from other sharpens due to its use of Kuwahara in combination of its
-unique edge/noise filtering from the sharpening output that attempts to reduce haloing.
+used in Oilify. It is different from other sharpens due to its use of Kuwahara in combination with its
+unique edge/noise filtering that reduces haloing and other undesirable sharpening artifacts.
 
 [Image Comparison](https://imgsli.com/NjYxMjU)
 
