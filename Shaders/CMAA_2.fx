@@ -901,7 +901,8 @@ void LongEdgePS(float4 position : SV_Position, float2 texcoord : TEXCOORD0, floa
 	float lerpK = lerpVal * srcOffset + secondPart;
 	lerpK *= dampenEffect;
 
-	output = float4(tex2Dfetch(sBackBuffer, position.xy + blendDir * float(srcOffset).xx).rgb, lerpK);
+	output.rgb = tex2D(sBackBuffer, ((position.xy + blendDir * float(srcOffset).xx * lerpK) + .5) * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT)).rgb;
+	output = output * 2.25;
 }
 
 
@@ -917,8 +918,10 @@ void ApplyPS(float4 position : SV_Position, float2 texcoord : TEXCOORD, out floa
 	}
 
 	//output =  tex2Dfetch(sBackBuffer, coord);
-	if(output.a <= 1.0 / c_maxLineLength)
+	if(output.a <= 0.5)
 		discard;
+
+	output.rgb /= output.a;
 }
 
 
@@ -1018,6 +1021,16 @@ technique CMAA_2 < ui_tooltip = "A port of Intel's CMAA 2.0 (Conservative Morpho
 #endif
 		ClearRenderTargets = false;
 
+		BlendEnable = true;
+
+		BlendOp = ADD;
+		BlendOpAlpha = ADD;
+
+		SrcBlend = ONE;
+		SrcBlendAlpha = ONE;
+		DestBlend = ONE;
+		DestBlendAlpha = ONE;
+
 		RenderTarget = ProcessedCandidates;
 	}
 
@@ -1027,9 +1040,10 @@ technique CMAA_2 < ui_tooltip = "A port of Intel's CMAA 2.0 (Conservative Morpho
 		PixelShader = ApplyPS;
 
 		BlendEnable = true;
-
+		
 		BlendOp = ADD;
-
+		BlendOpAlpha = ADD;
+		
 		SrcBlend = SRCALPHA;
 		DestBlend = INVSRCALPHA;
 	}	
